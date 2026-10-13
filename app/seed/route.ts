@@ -5,7 +5,6 @@ import { invoices, customers, revenue, users } from '../lib/placeholder-data';
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
 
 async function seedUsers() {
-  await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -30,7 +29,6 @@ async function seedUsers() {
 }
 
 async function seedInvoices() {
-  await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS invoices (
@@ -41,6 +39,10 @@ async function seedInvoices() {
       date DATE NOT NULL
     );
   `;
+
+  // invoices 的 id 由数据库生成，ON CONFLICT (id) 无法去重，已有数据时跳过以免重复插入
+  const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM invoices`;
+  if (count > 0) return [];
 
   const insertedInvoices = await Promise.all(
     invoices.map(
@@ -56,7 +58,6 @@ async function seedInvoices() {
 }
 
 async function seedCustomers() {
-  await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS customers (
@@ -103,12 +104,12 @@ async function seedRevenue() {
 
 export async function GET() {
   try {
-    const result = await sql.begin((sql) => [
-      seedUsers(),
-      seedCustomers(),
-      seedInvoices(),
-      seedRevenue(),
-    ]);
+    // 扩展只建一次，且各表按顺序建，避免并发 CREATE EXTENSION 触发唯一约束冲突
+    await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
+    await seedUsers();
+    await seedCustomers();
+    await seedInvoices();
+    await seedRevenue();
 
     return Response.json({ message: 'Database seeded successfully' });
   } catch (error) {
